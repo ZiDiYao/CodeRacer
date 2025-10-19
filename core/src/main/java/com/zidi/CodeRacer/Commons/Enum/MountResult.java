@@ -1,0 +1,15 @@
+package com.zidi.CodeRacer.Commons.Enum;
+
+public enum MountResult {
+    SUCCESS,
+    FAILED_ALREADY_OCCUPIED,
+    FAILED_INVALID_SITE,
+    FAILED_NULL_PART,
+    FAILED_PART_ALREADY_INSTALLED,
+    UNMOUNT_SUCCESS,
+    UNMOUNT_FAILED_NO_PART,
+
+    FAILED_NULL,
+
+    FAILED_CAPACITY_EXCEEDED
+}
