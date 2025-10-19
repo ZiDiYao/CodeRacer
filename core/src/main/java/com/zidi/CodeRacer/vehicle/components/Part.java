@@ -48,5 +48,5 @@ public abstract class Part {
     public void onBeforeUninstall()               {}
     public void onAfterUninstall()                {}
     // be able to reset the part back to origin like durability...
-     public abstract void reset();
+
 }

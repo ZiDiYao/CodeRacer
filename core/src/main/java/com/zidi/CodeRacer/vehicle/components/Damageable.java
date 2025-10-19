@@ -58,4 +58,6 @@ public interface Damageable {
      * Typical usage: detach from frame, emit destruction effects, broadcast events, etc.
      */
     default void onDestroyed() { /* no-op */ }
+
+    void reset();
 }
