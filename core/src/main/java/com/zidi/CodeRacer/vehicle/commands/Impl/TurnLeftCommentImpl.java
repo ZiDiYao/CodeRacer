@@ -1,4 +1,10 @@
 package com.zidi.CodeRacer.vehicle.commands.Impl;
 
-public class TurnLeftCommentImpl {
+import com.zidi.CodeRacer.vehicle.commands.TurnLeftComment;
+
+public class TurnLeftCommentImpl implements TurnLeftComment {
+    @Override
+    public void executeTurnLeft() {
+
+    }
 }
