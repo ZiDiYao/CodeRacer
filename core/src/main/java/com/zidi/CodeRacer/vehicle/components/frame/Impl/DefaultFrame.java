@@ -12,26 +12,30 @@ import java.util.Map;
 
 public abstract class DefaultFrame extends Part implements Frame, Damageable {
 
-    protected int durability;
+    protected int durability;                 // 当前耐久度（仍在父类）
     protected int mountCount;
     protected final int maxMountCount;
+    protected final int maxDurability;        // 上提并设为 final
 
-    /** 允许的挂点集合，由子类在构造时传入；value 为已装零件（未装为 null） */
     protected final Map<InstallSite, Part> mounts = new HashMap<>();
 
     protected DefaultFrame(String id, String name, String desc, int mass, int cost,
+                           int maxDurability,                      // 新增
                            int maxMountCount,
                            Collection<InstallSite> allowedSites) {
         super(id, name, desc, mass, cost);
+        this.maxDurability = maxDurability;   // 构造期一次性确定
         this.maxMountCount = maxMountCount;
-        // 子类决定有哪些挂点，这里只建立 key，初始为 null
         for (InstallSite s : allowedSites) mounts.put(s, null);
     }
 
     // ---- Damageable ----
     @Override public int getDurability() { return durability; }
+    @Override public int getMaxDurability() { return maxDurability; }   // ✅ 统一实现
     @Override public boolean isBroken() { return durability <= 0; }
-    @Override public void takeDamage(int amount) {
+
+    @Override
+    public void takeDamage(int amount) {
         if (amount <= 0) return;
         int before = durability;
         durability = Math.max(0, durability - amount);
@@ -39,7 +43,7 @@ public abstract class DefaultFrame extends Part implements Frame, Damageable {
         if (before > 0 && durability == 0) onDestroyed();
     }
 
-    // ---- Frame ----
+    // ---- Frame ----（原样）
     @Override public Map<InstallSite, Part> getMountedParts() { return Collections.unmodifiableMap(mounts); }
     @Override public int getMountCount() { return mountCount; }
     @Override public int getMaxMountCount() { return maxMountCount; }
@@ -66,7 +70,7 @@ public abstract class DefaultFrame extends Part implements Frame, Damageable {
         if (current == null) return MountResult.UNMOUNT_FAILED_NO_PART;
 
         current.onBeforeUninstall();
-        mounts.put(site, null);           // 保留挂点，只清空
+        mounts.put(site, null);
         current.setInstalled(false);
         current.onAfterUninstall();
         mountCount = Math.max(0, mountCount - 1);
