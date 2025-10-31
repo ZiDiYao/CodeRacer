@@ -3,20 +3,23 @@ package com.zidi.CodeRacer.vehicle.components.frame;
 import com.zidi.CodeRacer.Commons.Enum.InstallSite;
 import com.zidi.CodeRacer.Commons.Enum.MountResult;
 import com.zidi.CodeRacer.vehicle.components.Part;
+import com.zidi.CodeRacer.world.coordinate.LocalCoordinateSystem;
+
 import java.util.Map;
 
-/**
- * Interface for the vehicle frame, responsible for mounting and removing parts.
- */
+/** 车辆车架：挂载零件 + 暴露位姿与局部坐标系 */
 public interface Frame {
     Map<InstallSite, Part> getMountedParts();
 
     MountResult mountPart(InstallSite site, Part part);
     MountResult unmountPart(InstallSite site);
 
-    /** 当前已装数量 */
     int getMountCount();
-
-    /** 此 Frame 所允许的最大挂载数（由具体实现决定） */
     int getMaxMountCount();
+
+    /** 位姿（位置/朝向/速度） */
+    Pose pose();
+
+    /** 车辆局部坐标系（基于 pose） */
+    LocalCoordinateSystem localCS();
 }

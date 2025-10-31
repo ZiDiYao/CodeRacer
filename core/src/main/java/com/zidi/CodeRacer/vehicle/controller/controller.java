@@ -1,4 +1,4 @@
 package com.zidi.CodeRacer.vehicle.controller;
 
-public interface controler {
+public interface controller {
 }

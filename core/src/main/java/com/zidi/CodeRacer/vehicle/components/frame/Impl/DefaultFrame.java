@@ -5,6 +5,9 @@ import com.zidi.CodeRacer.Commons.Enum.MountResult;
 import com.zidi.CodeRacer.vehicle.components.Damageable;
 import com.zidi.CodeRacer.vehicle.components.Part;
 import com.zidi.CodeRacer.vehicle.components.frame.Frame;
+import com.zidi.CodeRacer.vehicle.components.frame.Pose;
+import com.zidi.CodeRacer.world.coordinate.LocalCoordinateSystem;
+
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -12,26 +15,43 @@ import java.util.Map;
 
 public abstract class DefaultFrame extends Part implements Frame, Damageable {
 
-    protected int durability;                 // 当前耐久度（仍在父类）
+    protected int durability;                 // 当前耐久度
     protected int mountCount;
     protected final int maxMountCount;
-    protected final int maxDurability;        // 上提并设为 final
+    protected final int maxDurability;        // 最大耐久（常量）
 
     protected final Map<InstallSite, Part> mounts = new HashMap<>();
 
+    /** 位姿（与 LocalCS 绑定的数据源） */
+    protected final Pose pose = new Pose();
+
+    /** 车体局部坐标系（绑定 Pose；懒加载一次即可） */
+    private LocalCoordinateSystem localCS;
+
     protected DefaultFrame(String id, String name, String desc, int mass, int cost,
-                           int maxDurability,                      // 新增
+                           int maxDurability,
                            int maxMountCount,
                            Collection<InstallSite> allowedSites) {
         super(id, name, desc, mass, cost);
-        this.maxDurability = maxDurability;   // 构造期一次性确定
+        this.maxDurability = maxDurability;
         this.maxMountCount = maxMountCount;
+        this.durability = maxDurability;         // ✅ 初始化
         for (InstallSite s : allowedSites) mounts.put(s, null);
+    }
+
+    // ---- Frame 扩展（位姿 & 坐标） ----
+    @Override public Pose pose() { return pose; }
+
+    /** 提供 LocalCS（内部共用一个实例；它读取 pose 的实时值，不需要每帧重建） */
+    @Override
+    public LocalCoordinateSystem localCS() {
+        if (localCS == null) localCS = new LocalCoordinateSystem(pose);
+        return localCS;
     }
 
     // ---- Damageable ----
     @Override public int getDurability() { return durability; }
-    @Override public int getMaxDurability() { return maxDurability; }   // ✅ 统一实现
+    @Override public int getMaxDurability() { return maxDurability; }
     @Override public boolean isBroken() { return durability <= 0; }
 
     @Override
@@ -43,7 +63,7 @@ public abstract class DefaultFrame extends Part implements Frame, Damageable {
         if (before > 0 && durability == 0) onDestroyed();
     }
 
-    // ---- Frame ----（原样）
+    // ---- 挂载/卸载 ----
     @Override public Map<InstallSite, Part> getMountedParts() { return Collections.unmodifiableMap(mounts); }
     @Override public int getMountCount() { return mountCount; }
     @Override public int getMaxMountCount() { return maxMountCount; }
