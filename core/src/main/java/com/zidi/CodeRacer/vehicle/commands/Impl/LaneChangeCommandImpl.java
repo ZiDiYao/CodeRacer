@@ -7,12 +7,12 @@ import com.zidi.CodeRacer.vehicle.runtime.VehicleContext;
 
 public class LaneChangeCommandImpl implements VehicleCommand {
     private final boolean left;
-    private final float laneWidth;       // 车道宽度（世界单位）
-    private final float length;          // 变道前进距离
-    private final float durationSeconds; // 持续时间（控制快慢）
+    private final float laneWidth;       // 一条车道的宽度：你这里传 1f
+    private final float length;          // 变道过程中向前走的距离（建议 6~12）
+    private final float durationSeconds; // 变道时长（建议 1.2~2.0）
 
-    private Vector2 p0, p1, p2, p3; // 曲线控制点
-    private float t = 0f;
+    private Vector2 start, dir, n;
+    private float t;
 
     public LaneChangeCommandImpl(boolean left, float laneWidth, float length, float durationSeconds) {
         this.left = left;
@@ -23,44 +23,40 @@ public class LaneChangeCommandImpl implements VehicleCommand {
 
     @Override
     public void onStart(VehicleContext ctx) {
-        Vector2 start = new Vector2(ctx.getX(), ctx.getY());
+        start = new Vector2(ctx.getX(), ctx.getY());
         float heading = ctx.getHeading();
-        Vector2 dir = new Vector2(MathUtils.cos(heading), MathUtils.sin(heading));
-        Vector2 n = new Vector2(-dir.y, dir.x); // 左法向
-        if (!left) n.scl(-1f); // 如果右变道则取反
-
-        // 生成 3 次贝塞尔控制点（S 型曲线）
-        p0 = start;
-        p3 = new Vector2(start).mulAdd(dir, length).mulAdd(n, laneWidth);
-        p1 = new Vector2(start).mulAdd(dir, length * 0.33f);
-        p2 = new Vector2(p3).mulAdd(dir, -length * 0.33f);
+        dir = new Vector2(MathUtils.cos(heading), MathUtils.sin(heading)); // 单位前向
+        n   = new Vector2(-dir.y, dir.x);                                   // 左法向
+        if (!left) n.scl(-1f);                                              // 右变道
         t = 0f;
     }
 
     @Override
     public boolean execute(float dt, VehicleContext ctx) {
         t = Math.min(1f, t + dt / durationSeconds);
-        Vector2 pos = bezier(p0, p1, p2, p3, t);
-        ctx.setPosition(pos.x, pos.y);
 
-        // 方向随曲线切线变化
-        Vector2 tan = bezierTangent(p0, p1, p2, p3, t);
-        ctx.setHeading((float)Math.atan2(tan.y, tan.x));
+        // 纵向：线性推进
+        float s = t;
+        float forward = length * s;
+
+        // 横向：SmoothStep（3s^2-2s^3），单调且端点导数为 0，绝不超过 laneWidth
+        float sSmooth = s * s * (3f - 2f * s);
+        float lateral = laneWidth * sSmooth;
+
+        // 新位置
+        float x = start.x + dir.x * forward + n.x * lateral;
+        float y = start.y + dir.y * forward + n.y * lateral;
+        ctx.setPosition(x, y);
+
+        // 朝向：用微小前向差分近似切线方向
+        float eps = 1e-3f;
+        float s2 = Math.min(1f, s + eps);
+        float f2 = length * s2;
+        float l2 = laneWidth * (s2 * s2 * (3f - 2f * s2));
+        float x2 = start.x + dir.x * f2 + n.x * l2;
+        float y2 = start.y + dir.y * f2 + n.y * l2;
+        ctx.setHeading((float) Math.atan2(y2 - y, x2 - x));
 
         return t >= 1f;
-    }
-
-    private static Vector2 bezier(Vector2 a, Vector2 b, Vector2 c, Vector2 d, float t) {
-        float u = 1f - t;
-        float x = u*u*u*a.x + 3*u*u*t*b.x + 3*u*t*t*c.x + t*t*t*d.x;
-        float y = u*u*u*a.y + 3*u*u*t*b.y + 3*u*t*t*c.y + t*t*t*d.y;
-        return new Vector2(x, y);
-    }
-
-    private static Vector2 bezierTangent(Vector2 a, Vector2 b, Vector2 c, Vector2 d, float t) {
-        float u = 1f - t;
-        float x = 3*u*u*(b.x - a.x) + 6*u*t*(c.x - b.x) + 3*t*t*(d.x - c.x);
-        float y = 3*u*u*(b.y - a.y) + 6*u*t*(c.y - b.y) + 3*t*t*(d.y - c.y);
-        return new Vector2(x, y);
     }
 }
