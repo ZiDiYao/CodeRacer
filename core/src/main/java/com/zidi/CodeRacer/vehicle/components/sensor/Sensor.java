@@ -1,20 +1,19 @@
 package com.zidi.CodeRacer.vehicle.components.sensor;
 
-import com.zidi.CodeRacer.vehicle.components.Part;
-
 public interface Sensor {
 
-    int getRange();
+    int getRange();             // 探测距离（tile）
+    float getSampleRateHz();    // 采样频率
+    int getFovDegrees();        // 视场角
 
-    float getSampleRateHz();
+    default int getPowerCost() { return 0; }
 
-    int getFovDegrees();
-
-    default int getPowerCost(){return 0;}
-
-    // Call this method to start detect
-
-    String detect();
-
+    /**
+     * 启动检测，返回结构化结果
+     * 例如：
+     *   - 对障碍物传感器 => distance, blocked
+     *   - 对车道传感器 => 偏移角、合法性
+     */
+    SensorReading detect();
 
 }

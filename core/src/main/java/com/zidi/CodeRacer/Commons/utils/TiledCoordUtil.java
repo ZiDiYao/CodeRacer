@@ -1,4 +1,4 @@
-package com.zidi.CodeRacer.utils;
+package com.zidi.CodeRacer.Commons.utils;
 
 import com.badlogic.gdx.maps.tiled.TiledMap;
 import com.badlogic.gdx.math.Rectangle;
