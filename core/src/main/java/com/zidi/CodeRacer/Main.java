@@ -9,7 +9,6 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.maps.MapLayer;
 import com.badlogic.gdx.maps.MapObject;
 import com.badlogic.gdx.maps.MapProperties;
-import com.badlogic.gdx.maps.objects.RectangleMapObject;
 import com.badlogic.gdx.maps.tiled.TiledMap;
 import com.badlogic.gdx.maps.tiled.TmxMapLoader;
 import com.badlogic.gdx.maps.tiled.renderers.OrthogonalTiledMapRenderer;
@@ -20,32 +19,25 @@ import com.badlogic.gdx.utils.viewport.FitViewport;
 import com.badlogic.gdx.utils.viewport.Viewport;
 import com.zidi.CodeRacer.vehicle.commands.CommandRunner;
 import com.zidi.CodeRacer.vehicle.commands.Impl.LaneChangeCommandImpl;
+import com.zidi.CodeRacer.vehicle.commands.Impl.TurnRightCommandImpl;
 import com.zidi.CodeRacer.vehicle.runtime.Impl.VehicleContextImpl;
 
-// === 传感器相关 ===
-import com.zidi.CodeRacer.vehicle.components.frame.Pose;
-import com.zidi.CodeRacer.vehicle.components.sensor.SensorReading;
-import com.zidi.CodeRacer.vehicle.components.sensor.Impl.BaseSensor;
+// 世界/地图
 import com.zidi.CodeRacer.Commons.utils.TiledWorldUtils;
 
-import java.util.ArrayList;
-import java.util.List;
+// 路口检测
+import com.zidi.CodeRacer.Commons.utils.IntersectionDetector;
+import com.zidi.CodeRacer.Commons.utils.IntersectionHit;
 
 public class Main extends ApplicationAdapter {
 
     // ===== 基本配置 =====
-    private static final float VIEW_W = 24f, VIEW_H = 14f;              // 视口（世界单位）
+    private static final float VIEW_W = 24f, VIEW_H = 14f;
     private static final String TMX_PATH = "Maps/Map04_withRoadSide.tmx";
     private static final String LAYER_SPAWN = "SpawnPoints";
     private static final String LAYER_INTER = "Intersection";
-    private static final float LANE_WIDTH = 1f;                          // 每条车道=1 格
-    private static float CRUISE_SPEED = 4f;                              // 巡航速度（格/秒）
-
-    // —— 安全/防抖参数 —— //
-    private static final float EMERGENCY_DIST = 2.0f;        // 变道/宽容期内的硬急停阈值（格）
-    private static final float GRACE_AFTER_LC = 0.25f;       // 变道结束后的宽容期（秒）
-    private static final float HEADING_DEADBAND_DEG = 5f;    // 死区：与冻结朝向小于 5° 视为已对齐
-    private static final int   REQUIRED_TRIGGER_FRAMES = 3;  // 变道/宽容期内，需连续命中 N 帧才急停
+    private static final float LANE_WIDTH = 1f;
+    private static float CRUISE_SPEED = 4f;
 
     // 渲染/相机
     private OrthographicCamera camera;
@@ -55,7 +47,7 @@ public class Main extends ApplicationAdapter {
     // 地图
     private TiledMap map;
     private OrthogonalTiledMapRenderer mapRenderer;
-    private float unitScale = 1f / 16f; // 1 tile(=16px) = 1 世界单位
+    private float unitScale = 1f / 16f;
     private int mapHeightPx = 1;
     private float mapTilesW = 1, mapTilesH = 1;
 
@@ -63,21 +55,8 @@ public class Main extends ApplicationAdapter {
     private VehicleContextImpl car;
     private CommandRunner runner;
 
-    // 路口世界矩形缓存
-    private final List<Rectangle> intersectionsWorld = new ArrayList<>();
-    private boolean wasInsideIntersection = false;
-
-    // ===== 传感器/世界/姿态 =====
-    private TiledWorldUtils world;
-    private Pose pose;                 // 传感器姿态（位置 + “传感器用朝向”）
-    private BaseSensor sensor;         // 碰撞预警
-
-    // 刹停 / 变道状态
-    private boolean emergencyBrake = false;
-    private boolean laneChanging = false;
-    private float frozenSenseHeading = 0f; // 变道/宽容期内冻结的“传感器朝向”
-    private float graceTimer = 0f;         // 宽容期计时
-    private int triggerFrames = 0;         // 连续命中计数（仅变道/宽容期内使用）
+    // 路口检测
+    private IntersectionDetector interDetector;
 
     @Override
     public void create() {
@@ -101,26 +80,20 @@ public class Main extends ApplicationAdapter {
 
         mapRenderer = new OrthogonalTiledMapRenderer(map, unitScale);
 
-        // 世界/碰撞工具（按你项目的签名调整）
-        world = new TiledWorldUtils(map, unitScale, mapHeightPx);
+        // 世界/碰撞工具（实验：只保留坐标/单位换算用途，不做碰撞）
+        // 世界
+        TiledWorldUtils world = new TiledWorldUtils(map, unitScale, mapHeightPx);
 
         // 出生点（像素→世界，翻转Y，再下移 1 格）
         Vector2 spawn = readFirstSpawnPointWorld();
         spawn.y -= 1f;
 
         // 车辆与命令
-        car = new VehicleContextImpl(spawn.x, spawn.y, 0f); // 初始朝向向右
+        car = new VehicleContextImpl(spawn.x, spawn.y, 0f);
         runner = new CommandRunner();
 
-        // 姿态与传感器
-        pose = new Pose(car.getX(), car.getY(), car.getHeading(), 0f);
-        sensor = new BaseSensor(
-            "SENSOR_FRONT", "Front Collision Warning",
-            "Warns when obstacle ahead within safe distance",
-            0, 0, world, pose
-        );
-
-        cacheIntersectionWorldRects();
+        // 路口检测器
+        interDetector = IntersectionDetector.fromMap(map, LAYER_INTER, unitScale, mapHeightPx);
 
         camera.position.set(car.getX(), car.getY(), 0f);
         camera.update();
@@ -130,96 +103,41 @@ public class Main extends ApplicationAdapter {
     public void render() {
         float dt = Gdx.graphics.getDeltaTime();
 
-        // —— 调速 & 手动复位 —— //
+        // 调速 & 手动清空队列（开发调试）
         if (Gdx.input.isKeyJustPressed(Input.Keys.MINUS)) CRUISE_SPEED = Math.max(1f, CRUISE_SPEED - 1f);
         if (Gdx.input.isKeyJustPressed(Input.Keys.EQUALS)) CRUISE_SPEED += 1f;
         if (Gdx.input.isKeyJustPressed(Input.Keys.R)) {
-            emergencyBrake = false;
-            triggerFrames = 0;
-            graceTimer = 0f;
-            laneChanging = false;
-            System.out.println("[Brake] manual reset");
-        }
-
-        // —— 变道 —— //
-        if (!emergencyBrake) {
-            if (Gdx.input.isKeyJustPressed(Input.Keys.Q)) startLaneChange(true);
-            if (Gdx.input.isKeyJustPressed(Input.Keys.E)) startLaneChange(false);
-        } else {
             runner.clear();
+            System.out.println("[Runner] cleared");
         }
 
-        // —— 执行动作 / 巡航 —— //
-        if (!emergencyBrake) {
-            runner.update(dt, car);
-            if (runner.isIdle()) {
-                if (laneChanging) {
-                    laneChanging = false;
-                    graceTimer = GRACE_AFTER_LC; // 进入宽容期：继续冻结传感器朝向
-                    // System.out.println("[LaneChange] finished; grace start");
-                }
-                cruiseForward(dt);
-            }
+        // 变道热键（和右转互不影响）
+        if (Gdx.input.isKeyJustPressed(Input.Keys.Q)) startLaneChange(true);
+        if (Gdx.input.isKeyJustPressed(Input.Keys.E)) startLaneChange(false);
+
+        // 执行动作 / 巡航（无碰撞，纯运动学）
+        runner.update(dt, car);
+        if (runner.isIdle()) {
+            cruiseForward(dt);
         }
 
-        // 宽容期计时递减
-        if (graceTimer > 0f) graceTimer -= dt;
+        // —— 路口检测：只要“进入”就排一个右转命令 —— //
+        IntersectionHit interHit = interDetector.update(car.getX(), car.getY());
+        if (interHit.entered) {
+            System.out.println("[Intersection] entered"
+                + (interHit.id != null ? (" #" + interHit.id) : "")
+                + " at (" + car.getX() + ", " + car.getY() + ")");
 
-        // 如果在宽容期内且车头已回正到死区内，则提前结束宽容期
-        if (graceTimer > 0f) {
-            float d = wrapAngleDelta(car.getHeading(), frozenSenseHeading);
-            if (Math.abs(d) <= MathUtils.degreesToRadians * HEADING_DEADBAND_DEG) {
-                graceTimer = 0f;
-            }
+            runner.clear();
+
+            Rectangle r = interHit.rect; // IntersectionDetector 需填充 rect
+            Vector2 laneCenter = computeExitLaneCenterForRightTurn(r, car.getHeading());
+
+            // 右转：微步右转 + 收尾吸附到靠边车道中心
+            runner.addCommand(new TurnRightCommandImpl(r, laneCenter.x, laneCenter.y));
         }
 
-        // —— 同步传感器姿态（位置总是跟车，朝向取决于是否冻结） —— //
-        float headingForSensor = (laneChanging || graceTimer > 0f) ? frozenSenseHeading : car.getHeading();
-        if (pose == null) pose = new Pose(car.getX(), car.getY(), headingForSensor, 0f);
-        else pose.set(car.getX(), car.getY(), headingForSensor, 0f);
-
-        // —— 传感器检测 —— //
-        if (sensor != null) {
-            SensorReading reading = sensor.detect();
-            if (reading != null && reading.triggered()) {
-                boolean inTransient = laneChanging || graceTimer > 0f;
-
-                if (inTransient) {
-                    // 变道/宽容期：必须足够近 + 连续 N 帧
-                    if (reading.distance() <= EMERGENCY_DIST) {
-                        triggerFrames++;
-                    } else {
-                        triggerFrames = 0;
-                    }
-                    if (triggerFrames >= REQUIRED_TRIGGER_FRAMES && !emergencyBrake) {
-                        emergencyBrake = true;
-                        runner.clear();
-                        System.out.println("[EMERGENCY] (transient) dist=" + reading.distance()
-                            + " at (" + car.getX() + ", " + car.getY() + ")");
-                    }
-                } else {
-                    // 正常直行：立即刹停
-                    if (!emergencyBrake) {
-                        emergencyBrake = true;
-                        runner.clear();
-                        System.out.println("[EMERGENCY] dist=" + reading.distance()
-                            + " at (" + car.getX() + ", " + car.getY() + ")");
-                    }
-                }
-            } else {
-                // 未命中则清零连续帧计数
-                triggerFrames = 0;
-            }
-        }
-
-        // —— 路口进入提示 —— //
-        boolean insideNow = isInsideAnyIntersection(car.getX(), car.getY());
-        if (insideNow && !wasInsideIntersection) {
-            System.out.println("[Intersection] entered at (" + car.getX() + ", " + car.getY() + ")");
-        }
-        wasInsideIntersection = insideNow;
-
-        // —— 相机与渲染 —— //
+        // 相机与渲染
         smoothFollowCamera();
 
         Gdx.gl.glClearColor(0.08f, 0.1f, 0.12f, 1f);
@@ -229,21 +147,13 @@ public class Main extends ApplicationAdapter {
 
         sr.setProjectionMatrix(camera.combined);
         sr.begin(ShapeRenderer.ShapeType.Line);
-        drawCarTriangle(sr, car.getX(), car.getY(), car.getHeading(), 0.7f);
-        if (emergencyBrake) {
-            float r = 1.0f;
-            sr.rect(car.getX() - r * 0.5f, car.getY() - r * 0.5f, r, r);
-        }
+        drawCarTriangle(sr, car.getX(), car.getY(), car.getHeading(), 0.45f);
         sr.end();
     }
 
     private void startLaneChange(boolean left) {
-        laneChanging = true;
-        frozenSenseHeading = car.getHeading(); // 冻结当前车头（即车道切线）作为传感器朝向
-        triggerFrames = 0;                      // 进入变道时清零防抖计数
         runner.clear();
         runner.addCommand(new LaneChangeCommandImpl(left, LANE_WIDTH + 1, 8f, 0.8f));
-        // System.out.println("[LaneChange] start " + (left ? "LEFT" : "RIGHT"));
     }
 
     @Override
@@ -256,7 +166,28 @@ public class Main extends ApplicationAdapter {
         if (sr != null) sr.dispose();
     }
 
-    // ====== 运动：持续巡航 ======
+    // ====== 右转：计算“右转后的出口车道中心”（一格车道｜一格虚线｜一格逆向） ======
+    private Vector2 computeExitLaneCenterForRightTurn(Rectangle interRect, float headingRad) {
+        String dir = headingNESW(headingRad);
+        float cx = interRect.x + interRect.width  * 0.5f;
+        float cy = interRect.y + interRect.height * 0.5f;
+
+        // 车道中心距离边缘 0.5 格（你的 LANE_WIDTH=1f）
+        float inset = 0.5f;
+
+        // 右转映射：E->S, S->W, W->N, N->E
+        return switch (dir) {
+            case "E" -> // 右转后朝南：取南向靠右车道中心（路口下边缘往内0.5）
+                    new Vector2(cx, interRect.y + inset);
+            case "S" -> // 右转后朝西：取西向靠右车道中心（左边缘往内0.5）
+                    new Vector2(interRect.x + inset, cy);
+            case "W" -> // 右转后朝北：取北向靠右车道中心（上边缘往内0.5）
+                    new Vector2(cx, interRect.y + interRect.height - inset); // 右转后朝东：取东向靠右车道中心（右边缘往内0.5）
+            default -> new Vector2(interRect.x + interRect.width - inset, cy);
+        };
+    }
+
+    // ===== 基础运动 =====
     private void cruiseForward(float dt) {
         float d = CRUISE_SPEED * dt;
         float h = car.getHeading();
@@ -266,7 +197,7 @@ public class Main extends ApplicationAdapter {
         );
     }
 
-    // ====== 读取出生点（像素→世界；翻转Y） ======
+    // ===== 出生点（像素→世界；翻转Y）=====
     private Vector2 readFirstSpawnPointWorld() {
         MapLayer sp = map.getLayers().get(LAYER_SPAWN);
         if (sp == null || sp.getObjects().getCount() == 0) return new Vector2(0, 0);
@@ -276,33 +207,9 @@ public class Main extends ApplicationAdapter {
         return new Vector2(xt * unitScale, (mapHeightPx - yt) * unitScale);
     }
 
-    // ====== 路口世界矩形缓存 ======
-    private void cacheIntersectionWorldRects() {
-        intersectionsWorld.clear();
-        MapLayer inter = map.getLayers().get(LAYER_INTER);
-        if (inter == null) return;
-        for (MapObject o : inter.getObjects()) {
-            if (o instanceof RectangleMapObject rmo) {
-                Rectangle rp = rmo.getRectangle(); // 像素矩形（左上原点）
-                float wx = rp.x * unitScale;
-                float wy = (mapHeightPx - rp.y - rp.height) * unitScale; // 翻转Y并减去高
-                float ww = rp.width * unitScale;
-                float wh = rp.height * unitScale;
-                intersectionsWorld.add(new Rectangle(wx, wy, ww, wh));
-            }
-        }
-    }
-
-    private boolean isInsideAnyIntersection(float x, float y) {
-        for (Rectangle r : intersectionsWorld) {
-            if (r.contains(x, y)) return true;
-        }
-        return false;
-    }
-
-    // ====== 相机跟随 ======
+    // ===== 相机跟随 =====
     private void smoothFollowCamera() {
-        float lerp = 0.12f; // 更稳一点
+        float lerp = 0.12f;
         camera.position.x += (car.getX() - camera.position.x) * lerp;
         camera.position.y += (car.getY() - camera.position.y) * lerp;
 
@@ -315,7 +222,7 @@ public class Main extends ApplicationAdapter {
         camera.update();
     }
 
-    // ====== 小工具 ======
+    // ===== 小工具 =====
     private static void drawCarTriangle(ShapeRenderer sr, float cx, float cy, float rad, float r) {
         Vector2 tip   = new Vector2(cx + r * MathUtils.cos(rad), cy + r * MathUtils.sin(rad));
         Vector2 left  = new Vector2(cx + 0.6f * MathUtils.cos(rad + 2.6f), cy + 0.6f * MathUtils.sin(rad + 2.6f));
@@ -336,11 +243,12 @@ public class Main extends ApplicationAdapter {
         return def;
     }
 
-    // 返回 a 相对 b 的最小弧度差（范围 [-π, π]）
-    private static float wrapAngleDelta(float a, float b) {
-        float d = a - b;
-        while (d > MathUtils.PI)  d -= MathUtils.PI2;
-        while (d < -MathUtils.PI) d += MathUtils.PI2;
-        return d;
+    private static String headingNESW(float rad) {
+        float deg = (float)Math.toDegrees(rad);
+        deg = (deg % 360 + 360) % 360;
+        if (deg >= 45 && deg < 135)  return "N";
+        if (deg >= 135 && deg < 225) return "W";
+        if (deg >= 225 && deg < 315) return "S";
+        return "E";
     }
 }
