@@ -15,15 +15,13 @@ public final class TiledCoordUtil {
         this.mapHpx = h * th;
     }
 
-    /** Tiled point(x,y) -> world(x,y), flip Y */
+    // 点
     public Vector2 toWorldPoint(float xt, float yt) {
-        return new Vector2(xt * unitScale, (mapHpx - yt) * unitScale);
+        return new Vector2(xt * unitScale, yt * unitScale); // 不翻转
+    }
+    // 矩形
+    public Rectangle toWorldRect(float x, float y, float w, float h) {
+        return new Rectangle(x * unitScale, y * unitScale, w * unitScale, h * unitScale); // 不翻转
     }
 
-    /** Tiled rect(x,y,w,h) -> world(x,y,w,h), flip Y and anchor bottom-left */
-    public Rectangle toWorldRect(float x, float y, float w, float h) {
-        float wx = x * unitScale;
-        float wy = (mapHpx - y - h) * unitScale;
-        return new Rectangle(wx, wy, w * unitScale, h * unitScale);
-    }
 }

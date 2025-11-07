@@ -49,4 +49,7 @@ public abstract class Part {
     public void onAfterUninstall()                {}
     // be able to reset the part back to origin like durability...
 
+    public String getName(){
+        return partName;
+    }
 }
