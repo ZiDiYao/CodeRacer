@@ -36,4 +36,8 @@ public abstract class DefaultSensor extends Part implements Sensor {
     @Override public float getSampleRateHz(){ return sampleRateHz; }
     @Override public int getFovDegrees()    { return fovDegrees; }
     @Override public int getPowerCost()     { return powerCost; }
+
+    public Pose pose() {
+        return this.pose;
+    }
 }
