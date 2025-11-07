@@ -34,10 +34,11 @@ public final class TiledWorldUtils {
             if (o instanceof RectangleMapObject rmo) {
                 Rectangle rp = rmo.getRectangle();               // 像素（左上原点）
                 float wx = rp.x * unitScale;
-                float wy = (mapHeightPx - rp.y - rp.height) * unitScale; // 翻转Y并减去高
+                float wy = rp.y * unitScale;              // 不翻转
                 float ww = rp.width  * unitScale;
                 float wh = rp.height * unitScale;
                 collisionsWorld.add(new Rectangle(wx, wy, ww, wh));
+
             }
         }
     }
