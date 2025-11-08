@@ -24,7 +24,7 @@ public class StickyTurnPolicy {
 
     public StickyTurnPolicy() {
         this(/*FRONT_HARD*/ 1.0f,
-            /*FRONT_SAFE*/ 0.01f,
+            /*FRONT_SAFE*/ 0.05f,
             /*BAND_LOW*/   0.02f,
             /*BAND_HIGH*/  0.02f,
             /*K_STABLE*/   4);

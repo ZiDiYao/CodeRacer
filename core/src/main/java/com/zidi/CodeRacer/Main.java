@@ -35,7 +35,7 @@ public class Main extends ApplicationAdapter {
     private static final float VIEW_W = 24f, VIEW_H = 14f;
     private static final String TMX_PATH = "Maps/circuit_04.tmx";
     private static final String LAYER_SPAWNS = "Spawns";
-    private static final float CRUISE_SPEED = 0.3f; // tile/s，别太快
+    private static final float CRUISE_SPEED = 5.0f; // tile/s，别太快
 
     private OrthographicCamera camera;
     private Viewport viewport;
